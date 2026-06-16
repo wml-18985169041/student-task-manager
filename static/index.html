@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学生任务管理系统</title>
+<style>
+/* ===== 全局样式 ===== */
+:root {
+  --bg: #f5f7fa;
+  --card: #ffffff;
+  --text: #1a1a2e;
+  --sub: #6b7280;
+  --border: #e5e7eb;
+  --primary: #4f46e5;
+  --primary-light: #eef2ff;
+  --danger: #ef4444;
+  --danger-light: #fef2f2;
+  --warning: #f59e0b;
+  --warning-light: #fffbeb;
+  --success: #10b981;
+  --success-light: #ecfdf5;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg: 0 10px 40px rgba(0,0,0,.10);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: var(--bg); color: var(--text); line-height:1.6; min-height:100vh;
+}
+a { color: var(--primary); text-decoration:none; }
+
+/* ===== 布局 ===== */
+header {
+  background: var(--card); border-bottom:1px solid var(--border);
+  padding: 0 24px; height:60px; display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:100; box-shadow:var(--shadow);
+}
+header h1 { font-size:18px; font-weight:700; display:flex; align-items:center; gap:8px; }
+header h1 span { font-size:22px; }
+nav { display:flex; gap:4px; }
+nav button {
+  padding:8px 16px; border:none; background:transparent; border-radius:8px;
+  cursor:pointer; font-size:14px; color: var(--sub); transition:all .15s;
+}
+nav button:hover { background: var(--bg); color: var(--text); }
+nav button.active { background: var(--primary-light); color: var(--primary); font-weight:600; }
+
+main { max-width:1100px; margin:0 auto; padding:24px; }
+
+/* ===== 统计卡片 ===== */
+.stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap:12px; margin-bottom:24px; }
+.stat-card {
+  background: var(--card); border-radius: var(--radius); padding:18px 20px;
+  box-shadow: var(--shadow); display:flex; align-items:center; gap:14px;
+}
+.stat-icon { font-size:28px; width:44px; height:44px; display:flex; align-items:center; justify-content:center; border-radius:10px; }
+.stat-icon.total   { background:#eef2ff; }
+.stat-icon.active  { background:#ecfdf5; }
+.stat-icon.overdue { background:#fef2f2; }
+.stat-icon.done    { background:#f0fdf4; }
+.stat-info .num { font-size:24px; font-weight:700; }
+.stat-info .label { font-size:12px; color:var(--sub); }
+
+/* ===== 工具栏 ===== */
+.toolbar {
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:20px;
+}
+.toolbar input, .toolbar select {
+  padding:9px 14px; border:1px solid var(--border); border-radius:8px;
+  font-size:14px; background:var(--card); outline:none; transition:border .15s;
+}
+.toolbar input:focus, .toolbar select:focus { border-color: var(--primary); }
+.toolbar input { flex:1; min-width:160px; }
+.btn {
+  padding:9px 18px; border:none; border-radius:8px; font-size:14px; font-weight:600;
+  cursor:pointer; transition:all .15s; display:inline-flex; align-items:center; gap:6px;
+}
+.btn-primary { background:var(--primary); color:#fff; }
+.btn-primary:hover { filter:brightness(1.1); box-shadow:var(--shadow-lg); }
+.btn-outline { background:var(--card); color:var(--primary); border:1px solid var(--primary); }
+.btn-sm { padding:5px 10px; font-size:12px; }
+.btn-danger { background:var(--danger); color:#fff; }
+.btn-danger:hover { filter:brightness(1.1); }
+
+/* ===== 任务列表 ===== */
+.task-list { display:flex; flex-direction:column; gap:10px; }
+.task-card {
+  background:var(--card); border-radius:var(--radius); padding:16px 20px;
+  box-shadow:var(--shadow); display:flex; align-items:center; gap:14px;
+  transition:transform .15s, box-shadow .15s; cursor:default;
+}
+.task-card:hover { transform:translateY(-1px); box-shadow:var(--shadow-lg); }
+.task-check {
+  width:22px; height:22px; border-radius:50%; border:2px solid var(--border);
+  flex-shrink:0; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  transition:all .15s; font-size:12px; color:transparent;
+}
+.task-check.done { background:var(--success); border-color:var(--success); color:#fff; }
+.task-body { flex:1; min-width:0; }
+.task-body .title { font-weight:600; font-size:15px; }
+.task-body .meta { font-size:12px; color:var(--sub); margin-top:3px; display:flex; flex-wrap:wrap; gap:8px; }
+.task-body .desc { font-size:13px; color:var(--sub); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:400px; }
+.task-actions { display:flex; gap:6px; flex-shrink:0; }
+
+/* 状态标签 */
+.tag {
+  display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;
+}
+.tag-pending  { background:#f3f4f6; color:#6b7280; }
+.tag-progress { background:#dbeafe; color:#2563eb; }
+.tag-done     { background:#d1fae5; color:#059669; }
+.tag-overdue  { background:#fee2e2; color:#dc2626; }
+
+/* 优先级标签 */
+.priority-dot { display:inline-block; width:8px; height:8px; border-radius:50%; }
+.pri-high { background:var(--danger); }
+.pri-mid  { background:var(--warning); }
+.pri-low  { background:var(--success); }
+
+/* ===== 模态框 ===== */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:200;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.modal {
+  background:var(--card); border-radius:16px; padding:28px; width:100%; max-width:520px;
+  box-shadow:var(--shadow-lg); max-height:90vh; overflow-y:auto;
+}
+.modal h2 { font-size:18px; margin-bottom:20px; }
+.form-group { margin-bottom:16px; }
+.form-group label { display:block; font-size:13px; font-weight:600; margin-bottom:5px; color:var(--sub); }
+.form-group input, .form-group select, .form-group textarea {
+  width:100%; padding:10px 14px; border:1px solid var(--border); border-radius:8px;
+  font-size:14px; font-family:inherit; outline:none; transition:border .15s;
+  background:var(--bg);
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--primary); }
+.form-group textarea { resize:vertical; min-height:70px; }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+
+/* ===== 日历 ===== */
+.calendar { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+.calendar-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px; border-bottom:1px solid var(--border);
+}
+.calendar-header h3 { font-size:16px; }
+.calendar-grid {
+  display:grid; grid-template-columns: repeat(7, 1fr);
+}
+.calendar-day-head {
+  padding:10px; text-align:center; font-size:12px; font-weight:600; color:var(--sub);
+  background:var(--bg); border-bottom:1px solid var(--border);
+}
+.calendar-day {
+  min-height:80px; padding:6px; border-bottom:1px solid var(--border);
+  border-right:1px solid var(--border); font-size:13px;
+}
+.calendar-day:nth-child(7n) { border-right:none; }
+.calendar-day .day-num { font-weight:600; margin-bottom:4px; }
+.calendar-day .day-task {
+  font-size:11px; padding:2px 6px; border-radius:4px; margin:1px 0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer;
+}
+.calendar-day .day-task:hover { filter:brightness(.95); }
+.day-task.pending  { background:#f3f4f6; }
+.day-task.progress { background:#dbeafe; }
+.day-task.done     { background:#d1fae5; }
+.day-task.overdue  { background:#fee2e2; }
+
+/* ===== 提醒面板 ===== */
+.reminder-banner {
+  background:var(--warning-light); border:1px solid var(--warning);
+  border-radius:var(--radius); padding:12px 18px; margin-bottom:16px;
+  display:flex; align-items:center; gap:10px; font-size:14px;
+}
+.reminder-danger {
+  background:var(--danger-light); border:1px solid var(--danger);
+  border-radius:var(--radius); padding:12px 18px; margin-bottom:16px;
+  display:flex; align-items:center; gap:10px; font-size:14px;
+}
+
+/* ===== 响应式 ===== */
+@media (max-width:640px) {
+  header { padding:0 14px; }
+  header h1 { font-size:15px; }
+  main { padding:14px; }
+  .task-card { flex-wrap:wrap; }
+  .task-actions { width:100%; justify-content:flex-end; }
+  .form-row { grid-template-columns:1fr; }
+  .calendar-day { min-height:50px; }
+  nav button { padding:6px 10px; font-size:12px; }
+}
+
+/* 空状态 */
+.empty { text-align:center; padding:60px 20px; color:var(--sub); }
+.empty .icon { font-size:48px; margin-bottom:12px; }
+
+/* 隐藏 */
+.hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部导航 ===== -->
+<header>
+  <h1><span>📋</span>学生任务管理系统</h1>
+  <nav>
+    <button onclick="switchView('list')" id="nav-list" class="active">📃 任务列表</button>
+    <button onclick="switchView('calendar')" id="nav-calendar">📅 日历视图</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===== 统计卡片 ===== -->
+  <div class="stats" id="stats">
+    <div class="stat-card"><div class="stat-icon total">📊</div><div class="stat-info"><div class="num" id="stat-total">0</div><div class="label">全部任务</div></div></div>
+    <div class="stat-card"><div class="stat-icon active">🏃</div><div class="stat-info"><div class="num" id="stat-progress">0</div><div class="label">进行中</div></div></div>
+    <div class="stat-card"><div class="stat-icon overdue">⚠️</div><div class="stat-info"><div class="num" id="stat-overdue">0</div><div class="label">已逾期</div></div></div>
+    <div class="stat-card"><div class="stat-icon done">✅</div><div class="stat-info"><div class="num" id="stat-done">0</div><div class="label">已完成</div></div></div>
+  </div>
+
+  <!-- ===== 提醒面板 ===== -->
+  <div id="reminders"></div>
+
+  <!-- ===== 列表视图 ===== -->
+  <div id="view-list">
+    <div class="toolbar">
+      <input type="text" id="search-input" placeholder="🔍 搜索任务标题或描述…" oninput="fetchTasks()">
+      <select id="filter-status" onchange="fetchTasks()">
+        <option value="">全部状态</option>
+        <option value="未开始">未开始</option>
+        <option value="进行中">进行中</option>
+        <option value="已完成">已完成</option>
+        <option value="已逾期">已逾期</option>
+      </select>
+      <select id="filter-course" onchange="fetchTasks()">
+        <option value="">全部课程</option>
+      </select>
+      <select id="filter-type" onchange="fetchTasks()">
+        <option value="">全部类型</option>
+        <option value="作业">作业</option>
+        <option value="考试">考试</option>
+        <option value="实验">实验</option>
+        <option value="其他">其他</option>
+      </select>
+      <button class="btn btn-primary" onclick="openCreateModal()">＋ 新建任务</button>
+    </div>
+    <div class="task-list" id="task-list"></div>
+  </div>
+
+  <!-- ===== 日历视图 ===== -->
+  <div id="view-calendar" class="hidden"></div>
+</main>
+
+<!-- ===== 任务编辑模态框 ===== -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal">
+    <h2 id="modal-title">新建任务</h2>
+    <form id="task-form" onsubmit="saveTask(event)">
+      <input type="hidden" id="form-id">
+      <div class="form-group">
+        <label>任务标题 *</label>
+        <input type="text" id="form-title" required placeholder="例如：完成高数作业第5章…">
+      </div>
+      <div class="form-group">
+        <label>任务描述</label>
+        <textarea id="form-desc" placeholder="补充说明…"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>课程名称</label>
+          <input type="text" id="form-course" placeholder="例如：高等数学" list="course-suggestions">
+          <datalist id="course-suggestions"></datalist>
+        </div>
+        <div class="form-group">
+          <label>任务类型</label>
+          <select id="form-type">
+            <option value="其他">其他</option>
+            <option value="作业">作业</option>
+            <option value="考试">考试</option>
+            <option value="实验">实验</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>优先级</label>
+          <select id="form-priority">
+            <option value="中">🟡 中</option>
+            <option value="高">🔴 高</option>
+            <option value="低">🟢 低</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>状态</label>
+          <select id="form-status">
+            <option value="未开始">未开始</option>
+            <option value="进行中">进行中</option>
+            <option value="已完成">已完成</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>截止时间 *</label>
+        <input type="datetime-local" id="form-deadline" required>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">取消</button>
+        <button type="submit" class="btn btn-primary">💾 保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// ===== API 配置 =====
+const API = window.location.origin + '/api';
+
+// ===== 视图切换 =====
+let currentView = 'list';
+let currentMonth = new Date();
+
+function switchView(view) {
+  currentView = view;
+  document.getElementById('view-list').classList.toggle('hidden', view !== 'list');
+  document.getElementById('view-calendar').classList.toggle('hidden', view !== 'calendar');
+  document.getElementById('nav-list').classList.toggle('active', view === 'list');
+  document.getElementById('nav-calendar').classList.toggle('active', view === 'calendar');
+  if (view === 'calendar') renderCalendar();
+  if (view === 'list') fetchTasks();
+}
+
+// ===== 数据获取 =====
+async function api(url, opts = {}) {
+  try {
+    const res = await fetch(API + url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || res.statusText); }
+    return await res.json();
+  } catch (err) {
+    console.error('API Error:', err);
+    alert('请求失败：' + err.message);
+    return null;
+  }
+}
+
+async function fetchTasks() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('filter-status').value;
+  const course = document.getElementById('filter-course').value;
+  const type   = document.getElementById('filter-type').value;
+  const search = document.getElementById('search-input').value.trim();
+  if (status) params.set('status', status);
+  if (course) params.set('course', course);
+  if (type)   params.set('task_type', type);
+  if (search) params.set('search', search);
+
+  const data = await api('/tasks?' + params.toString());
+  if (!data) return;
+  renderTaskList(data.tasks);
+  updateCourseFilters();
+  updateStats();
+  fetchReminders();
+}
+
+async function updateStats() {
+  const data = await api('/stats');
+  if (!data) return;
+  document.getElementById('stat-total').textContent = data.total || 0;
+  document.getElementById('stat-progress').textContent = (data.by_status || {})['进行中'] || 0;
+  document.getElementById('stat-overdue').textContent = (data.by_status || {})['已逾期'] || 0;
+  document.getElementById('stat-done').textContent = (data.by_status || {})['已完成'] || 0;
+}
+
+async function fetchReminders() {
+  const data = await api('/reminders');
+  if (!data) return;
+  const container = document.getElementById('reminders');
+  let html = '';
+  if (data.overdue && data.overdue.length > 0) {
+    html += '<div class="reminder-danger">⚠️ <b>已逾期的任务：</b>'
+      + data.overdue.map(t => `"${escapeHtml(t.title)}"（截止: ${fmtDate(t.deadline)}）`).join('、')
+      + ' — 请尽快处理！</div>';
+  }
+  if (data.upcoming && data.upcoming.length > 0) {
+    html += '<div class="reminder-banner">⏰ <b>即将到期的任务：</b>'
+      + data.upcoming.map(t => `"${escapeHtml(t.title)}"（截止: ${fmtDate(t.deadline)}）`).join('、')
+      + '</div>';
+  }
+  container.innerHTML = html;
+}
+
+// ===== 渲染任务列表 =====
+function renderTaskList(tasks) {
+  const el = document.getElementById('task-list');
+  if (!tasks.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>暂无任务，点击右上角「新建任务」开始吧！</p></div>';
+    return;
+  }
+  el.innerHTML = tasks.map(t => {
+    const doneClass = t.status === '已完成' ? 'done' : '';
+    const statusTag = `<span class="tag tag-${statusKey(t.status)}">${t.status}</span>`;
+    const priorityDot = `<span class="priority-dot pri-${t.priority==='高'?'high':t.priority==='低'?'low':'mid'}" title="优先级:${t.priority}"></span>`;
+    return `
+    <div class="task-card" data-id="${t.id}">
+      <div class="task-check ${doneClass}" onclick="toggleDone(${t.id}, '${t.status}')" title="切换完成状态">✓</div>
+      <div class="task-body" onclick="openEditModal(${t.id})" style="cursor:pointer">
+        <div class="title">${priorityDot} ${escapeHtml(t.title)} ${statusTag}</div>
+        <div class="meta">
+          <span>📚 ${escapeHtml(t.course_name || '未分类')}</span>
+          <span>📂 ${t.task_type}</span>
+          <span>⏱ 截止: ${fmtDate(t.deadline)}</span>
+        </div>
+        ${t.description ? `<div class="desc">${escapeHtml(t.description)}</div>` : ''}
+      </div>
+      <div class="task-actions">
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditModal(${t.id})">✏️ 编辑</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteTask(${t.id})">🗑 删除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ===== 模态框 =====
+function openCreateModal() {
+  document.getElementById('modal-title').textContent = '新建任务';
+  document.getElementById('task-form').reset();
+  document.getElementById('form-id').value = '';
+  // 默认截止时间为明天此时
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  document.getElementById('form-deadline').value = tomorrow.toISOString().slice(0, 16);
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+async function openEditModal(id) {
+  const task = await api('/tasks/' + id);
+  if (!task) return;
+  document.getElementById('modal-title').textContent = '编辑任务';
+  document.getElementById('form-id').value = task.id;
+  document.getElementById('form-title').value = task.title;
+  document.getElementById('form-desc').value = task.description || '';
+  document.getElementById('form-course').value = task.course_name || '';
+  document.getElementById('form-type').value = task.task_type || '其他';
+  document.getElementById('form-priority').value = task.priority || '中';
+  document.getElementById('form-status').value = task.status || '未开始';
+  document.getElementById('form-deadline').value = task.deadline ? task.deadline.slice(0, 16) : '';
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+}
+
+async function saveTask(e) {
+  e.preventDefault();
+  const id = document.getElementById('form-id').value;
+  const body = {
+    title: document.getElementById('form-title').value.trim(),
+    description: document.getElementById('form-desc').value.trim(),
+    course_name: document.getElementById('form-course').value.trim(),
+    task_type: document.getElementById('form-type').value,
+    priority: document.getElementById('form-priority').value,
+    status: document.getElementById('form-status').value,
+    deadline: document.getElementById('form-deadline').value,
+  };
+  if (!body.title || !body.deadline) return alert('请填写任务标题和截止时间');
+
+  if (id) {
+    await api('/tasks/' + id, { method: 'PUT', body: JSON.stringify(body) });
+  } else {
+    await api('/tasks', { method: 'POST', body: JSON.stringify(body) });
+  }
+  closeModal();
+  fetchTasks();
+}
+
+async function deleteTask(id) {
+  if (!confirm('确定要删除这个任务吗？此操作不可撤销。')) return;
+  await api('/tasks/' + id, { method: 'DELETE' });
+  fetchTasks();
+}
+
+async function toggleDone(id, status) {
+  const newStatus = status === '已完成' ? '未开始' : '已完成';
+  await api('/tasks/' + id, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+  fetchTasks();
+}
+
+// ===== 课程筛选 =====
+async function updateCourseFilters() {
+  const data = await api('/tasks?limit=1000');
+  if (!data) return;
+  const courses = [...new Set(data.tasks.map(t => t.course_name).filter(Boolean))];
+  const sel = document.getElementById('filter-course');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">全部课程</option>' + courses.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = current;
+
+  // 更新表单里的课程建议
+  document.getElementById('course-suggestions').innerHTML = courses.map(c => `<option value="${escapeHtml(c)}">`).join('');
+}
+
+// ===== 日历视图 =====
+async function renderCalendar() {
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+
+  // 获取本月数据
+  const startDate = `${year}-${String(month+1).padStart(2,'0')}-01`;
+  const endDate   = `${year}-${String(month+1).padStart(2,'0')}-${String(lastDay.getDate()).padStart(2,'0')}`;
+  const data = await api(`/tasks/calendar?start_date=${startDate}&end_date=${endDate}`);
+  const tasks = data ? data.tasks : [];
+  const tasksByDay = {};
+  tasks.forEach(t => {
+    const day = t.deadline.slice(0, 10);
+    if (!tasksByDay[day]) tasksByDay[day] = [];
+    tasksByDay[day].push(t);
+  });
+
+  const weeks = ['日','一','二','三','四','五','六'];
+  let html = '<div class="calendar">';
+  html += `<div class="calendar-header">
+    <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">◀ 上月</button>
+    <h3>${year}年 ${month+1}月</h3>
+    <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">下月 ▶</button>
+  </div>`;
+  html += '<div class="calendar-grid">';
+  html += weeks.map(d => `<div class="calendar-day-head">${d}</div>`).join('');
+
+  // 填充月初空白
+  const startDow = firstDay.getDay();
+  for (let i = 0; i < startDow; i++) {
+    html += '<div class="calendar-day" style="background:#fafafa"></div>';
+  }
+  // 填充日期
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayTasks = tasksByDay[dateStr] || [];
+    html += `<div class="calendar-day">
+      <div class="day-num">${d}</div>
+      ${dayTasks.map(t => `<div class="day-task ${statusKey(t.status)}" title="${escapeHtml(t.title)}\n${t.course_name}">${escapeHtml(t.title)}</div>`).join('')}
+    </div>`;
+  }
+  html += '</div></div>';
+  document.getElementById('view-calendar').innerHTML = html;
+}
+
+function changeMonth(delta) {
+  currentMonth.setMonth(currentMonth.getMonth() + delta);
+  renderCalendar();
+}
+
+// ===== 工具函数 =====
+function fmtDate(iso) {
+  if (!iso) return '-';
+  return iso.replace('T', ' ').slice(0, 16);
+}
+function statusKey(s) {
+  const m = {'未开始':'pending','进行中':'progress','已完成':'done','已逾期':'overdue'};
+  return m[s] || 'pending';
+}
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== 点击空白处关闭模态框 =====
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ===== 键盘快捷键 =====
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+  if (e.ctrlKey && e.key === 'n') { e.preventDefault(); openCreateModal(); }
+});
+
+// ===== 初始化 =====
+fetchTasks();
+updateStats();
+</script>
+</body>
+</html>
