@@ -1,33 +1,28 @@
 """
-学生任务管理系统 - FastAPI 后端
+学生任务管理系统 - Flask 后端（适配 PythonAnywhere 部署）
 """
 import os
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from typing import Optional
+from flask import Flask, request, jsonify, send_from_directory
 
 # ── 配置（从环境变量读取，带默认值） ─────────────────────────────
 HOST = os.getenv("TASK_APP_HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", os.getenv("TASK_APP_PORT", "8080")))
-DB_PATH = os.getenv("TASK_DB_PATH", "student_tasks.db")
+DB_PATH = os.getenv("TASK_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "student_tasks.db"))
 REMIND_HOURS = int(os.getenv("TASK_REMIND_HOURS", "24"))
 
-app = FastAPI(title="学生任务管理系统", version="1.0.0")
+app = Flask(__name__, static_folder="static", static_url_path="")
 
 # CORS — 允许任意来源访问
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.after_request
+def add_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
 
 
 # ── 数据库 ───────────────────────────────────────────────────────
@@ -68,30 +63,8 @@ def init_db():
 init_db()
 
 
-# ── Pydantic 模型 ────────────────────────────────────────────────
-class TaskCreate(BaseModel):
-    title: str
-    description: str = ""
-    course_name: str = ""
-    task_type: str = "其他"       # 作业 / 考试 / 实验 / 其他
-    priority: str = "中"          # 高 / 中 / 低
-    deadline: str                 # ISO 格式: "2026-06-20T15:00"
-    status: str = "未开始"        # 未开始 / 进行中 / 已完成 / 已逾期
-
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    course_name: Optional[str] = None
-    task_type: Optional[str] = None
-    priority: Optional[str] = None
-    deadline: Optional[str] = None
-    status: Optional[str] = None
-
-
 # ── 辅助函数 ─────────────────────────────────────────────────────
 def dict_from_row(row) -> dict:
-    """把 sqlite3.Row 转为普通 dict"""
     return dict(row) if row else None
 
 
@@ -113,160 +86,212 @@ def check_overdue(task: dict) -> dict:
     return task
 
 
+# ── 验证函数 ─────────────────────────────────────────────────────
+VALID_STATUSES = {"未开始", "进行中", "已完成", "已逾期"}
+VALID_PRIORITIES = {"高", "中", "低"}
+VALID_TYPES = {"作业", "考试", "实验", "其他"}
+
+
+def validate_task(data, is_update=False):
+    """验证任务数据，返回 (错误信息, 清理后的数据)"""
+    errors = []
+
+    if not is_update:
+        if not data.get("title", "").strip():
+            errors.append("任务标题不能为空")
+        if not data.get("deadline", "").strip():
+            errors.append("截止时间不能为空")
+    else:
+        if "title" in data and not data.get("title", "").strip():
+            errors.append("任务标题不能为空")
+
+    if data.get("status") and data["status"] not in VALID_STATUSES:
+        errors.append(f"无效的状态: {data['status']}")
+    if data.get("priority") and data["priority"] not in VALID_PRIORITIES:
+        errors.append(f"无效的优先级: {data['priority']}")
+    if data.get("task_type") and data["task_type"] not in VALID_TYPES:
+        errors.append(f"无效的任务类型: {data['task_type']}")
+
+    if errors:
+        return "; ".join(errors), None
+
+    # 清理数据
+    cleaned = {}
+    for field in ["title", "description", "course_name", "task_type", "priority", "deadline", "status"]:
+        if field in data:
+            val = data[field]
+            if isinstance(val, str):
+                val = val.strip()
+            cleaned[field] = val
+    return None, cleaned
+
+
+# ── 首页 ─────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+
 # ── API 路由 ─────────────────────────────────────────────────────
 
-@app.get("/api/tasks")
-def list_tasks(
-    status: Optional[str] = Query(None, description="按状态筛选"),
-    course: Optional[str] = Query(None, description="按课程名称筛选"),
-    task_type: Optional[str] = Query(None, description="按任务类型筛选"),
-    priority: Optional[str] = Query(None, description="按优先级筛选"),
-    search: Optional[str] = Query(None, description="标题/描述模糊搜索"),
-):
-    """获取任务列表，支持多条件筛选"""
-    query = "SELECT * FROM tasks WHERE 1=1"
-    params = []
+@app.route("/api/tasks", methods=["GET", "POST", "OPTIONS"])
+def tasks_list():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
 
-    if status:
-        query += " AND status=?"
-        params.append(status)
-    if course:
-        query += " AND course_name=?"
-        params.append(course)
-    if task_type:
-        query += " AND task_type=?"
-        params.append(task_type)
-    if priority:
-        query += " AND priority=?"
-        params.append(priority)
-    if search:
-        query += " AND (title LIKE ? OR description LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
+    if request.method == "GET":
+        status = request.args.get("status")
+        course = request.args.get("course")
+        task_type = request.args.get("task_type")
+        priority = request.args.get("priority")
+        search = request.args.get("search")
 
-    query += " ORDER BY deadline ASC"
+        query = "SELECT * FROM tasks WHERE 1=1"
+        params = []
 
-    with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
+        if status:
+            query += " AND status=?"
+            params.append(status)
+        if course:
+            query += " AND course_name=?"
+            params.append(course)
+        if task_type:
+            query += " AND task_type=?"
+            params.append(task_type)
+        if priority:
+            query += " AND priority=?"
+            params.append(priority)
+        if search:
+            query += " AND (title LIKE ? OR description LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%"])
 
-    tasks = [check_overdue(dict_from_row(r)) for r in rows]
-    return {"count": len(tasks), "tasks": tasks}
+        query += " ORDER BY deadline ASC"
+
+        with get_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        tasks = [check_overdue(dict_from_row(r)) for r in rows]
+        return jsonify({"count": len(tasks), "tasks": tasks})
+
+    if request.method == "POST":
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"detail": "请求体不能为空"}), 400
+
+        error, cleaned = validate_task(data)
+        if error:
+            return jsonify({"detail": error}), 400
+
+        cleaned.setdefault("description", "")
+        cleaned.setdefault("course_name", "")
+        cleaned.setdefault("task_type", "其他")
+        cleaned.setdefault("priority", "中")
+        cleaned.setdefault("status", "未开始")
+
+        with get_db() as conn:
+            cur = conn.execute(
+                """INSERT INTO tasks (title, description, course_name, task_type,
+                                      priority, deadline, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (cleaned["title"], cleaned["description"], cleaned["course_name"],
+                 cleaned["task_type"], cleaned["priority"], cleaned["deadline"], cleaned["status"]),
+            )
+            new_id = cur.lastrowid
+        return jsonify({"id": new_id, "message": "任务创建成功"}), 201
 
 
-@app.get("/api/tasks/calendar")
-def calendar_view(
-    start_date: str = Query(..., description="起始日期 ISO 格式: 2026-06-01"),
-    end_date: str = Query(..., description="结束日期 ISO 格式: 2026-06-30"),
-):
-    """按日期范围查询任务（日历视图用）"""
+@app.route("/api/tasks/calendar", methods=["GET"])
+def calendar_view():
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    if not start_date or not end_date:
+        return jsonify({"detail": "缺少 start_date 或 end_date 参数"}), 400
+
     with get_db() as conn:
         rows = conn.execute(
-            """
-            SELECT * FROM tasks
-            WHERE date(deadline) BETWEEN date(?) AND date(?)
-            ORDER BY deadline ASC
-            """,
+            """SELECT * FROM tasks
+               WHERE date(deadline) BETWEEN date(?) AND date(?)
+               ORDER BY deadline ASC""",
             (start_date, end_date),
         ).fetchall()
     tasks = [check_overdue(dict_from_row(r)) for r in rows]
-    return {"count": len(tasks), "tasks": tasks}
+    return jsonify({"count": len(tasks), "tasks": tasks})
 
 
-@app.get("/api/reminders")
+@app.route("/api/reminders", methods=["GET"])
 def get_reminders():
-    """获取即将到期和已逾期的提醒任务"""
     now = datetime.now()
     remind_before = now + timedelta(hours=REMIND_HOURS)
 
     with get_db() as conn:
-        # 临近截止（24小时内，未完成）
         upcoming = conn.execute(
-            """
-            SELECT * FROM tasks
-            WHERE status NOT IN ('已完成', '已逾期')
-              AND deadline BETWEEN ? AND ?
-            ORDER BY deadline ASC
-            """,
+            """SELECT * FROM tasks
+               WHERE status NOT IN ('已完成', '已逾期')
+                 AND deadline BETWEEN ? AND ?
+               ORDER BY deadline ASC""",
             (now.isoformat(), remind_before.isoformat()),
         ).fetchall()
 
-        # 已逾期（未完成）
         overdue = conn.execute(
-            """
-            SELECT * FROM tasks
-            WHERE status NOT IN ('已完成', '已逾期')
-              AND deadline < ?
-            ORDER BY deadline ASC
-            """,
+            """SELECT * FROM tasks
+               WHERE status NOT IN ('已完成', '已逾期')
+                 AND deadline < ?
+               ORDER BY deadline ASC""",
             (now.isoformat(),),
         ).fetchall()
 
-    # 自动标记逾期
     for r in overdue:
         check_overdue(dict_from_row(r))
 
-    return {
+    return jsonify({
         "upcoming": [dict_from_row(r) for r in upcoming],
         "overdue": [dict_from_row(r) for r in overdue],
-    }
+    })
 
 
-@app.get("/api/tasks/{task_id}")
-def get_task(task_id: int):
-    """获取单个任务"""
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    return dict_from_row(row)
+@app.route("/api/tasks/<int:task_id>", methods=["GET", "PUT", "DELETE", "OPTIONS"])
+def task_detail(task_id):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    if request.method == "GET":
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            return jsonify({"detail": "任务不存在"}), 404
+        return jsonify(dict_from_row(row))
+
+    if request.method == "PUT":
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"detail": "请求体不能为空"}), 400
+
+        error, cleaned = validate_task(data, is_update=True)
+        if error:
+            return jsonify({"detail": error}), 400
+
+        if not cleaned:
+            return jsonify({"detail": "没有提供需要更新的字段"}), 400
+
+        cleaned["updated_at"] = datetime.now().isoformat()
+        set_clause = ", ".join(f"{k}=?" for k in cleaned.keys())
+        values = list(cleaned.values()) + [task_id]
+
+        with get_db() as conn:
+            conn.execute(f"UPDATE tasks SET {set_clause} WHERE id=?", values)
+
+        return jsonify({"message": "任务更新成功"})
+
+    if request.method == "DELETE":
+        with get_db() as conn:
+            cur = conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+            if cur.rowcount == 0:
+                return jsonify({"detail": "任务不存在"}), 404
+        return jsonify({"message": "任务已删除"})
 
 
-@app.post("/api/tasks", status_code=201)
-def create_task(task: TaskCreate):
-    """创建新任务"""
-    with get_db() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO tasks (title, description, course_name, task_type,
-                               priority, deadline, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (task.title, task.description, task.course_name, task.task_type,
-             task.priority, task.deadline, task.status),
-        )
-        new_id = cur.lastrowid
-    return {"id": new_id, "message": "任务创建成功"}
-
-
-@app.put("/api/tasks/{task_id}")
-def update_task(task_id: int, task: TaskUpdate):
-    """更新任务"""
-    updates = task.model_dump(exclude_none=True)
-    if not updates:
-        raise HTTPException(status_code=400, detail="没有提供需要更新的字段")
-
-    updates["updated_at"] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k}=?" for k in updates.keys())
-    values = list(updates.values()) + [task_id]
-
-    with get_db() as conn:
-        conn.execute(f"UPDATE tasks SET {set_clause} WHERE id=?", values)
-
-    return {"message": "任务更新成功"}
-
-
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int):
-    """删除任务"""
-    with get_db() as conn:
-        cur = conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="任务不存在")
-    return {"message": "任务已删除"}
-
-
-@app.get("/api/stats")
+@app.route("/api/stats", methods=["GET"])
 def get_stats():
-    """获取统计概览"""
     with get_db() as conn:
         total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
         by_status = {}
@@ -280,17 +305,11 @@ def get_stats():
         ).fetchall():
             by_type[row["task_type"]] = row["cnt"]
 
-    return {"total": total, "by_status": by_status, "by_type": by_type}
-
-
-# ── 静态文件服务（前端 HTML） ────────────────────────────────────
-# 必须放在最后，避免覆盖 API 路由
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+    return jsonify({"total": total, "by_status": by_status, "by_type": by_type})
 
 
 # ── 启动入口 ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import uvicorn
     print(f"  学生任务管理系统 启动中...")
     print(f"  本地访问: http://{HOST}:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT)
+    app.run(host=HOST, port=PORT, debug=False)
